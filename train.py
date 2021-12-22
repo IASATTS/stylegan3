@@ -133,6 +133,39 @@ def locate_latest_pkl(outdir: str):
 
 #----------------------------------------------------------------------------
 
+def parse_augment_p_from_log(network_pickle_name):
+
+    if network_pickle_name is not None:
+        network_folder_name = os.path.dirname(network_pickle_name)
+        log_file_name = network_folder_name + "/log.txt"
+
+        try:
+            with open(log_file_name, "r") as f:
+                # Tokenize each line starting with the word 'tick'
+                lines = [
+                    l.strip().split() for l in f.readlines() if l.startswith("tick")
+                ]
+        except FileNotFoundError:
+            lines = []
+
+        # Extract the last token of each line for which the second to last token is 'augment'
+        values = [
+            tokens[-1]
+            for tokens in lines
+            if len(tokens) > 1 and tokens[-2] == "augment"
+        ]
+
+        if len(values)>0:
+            augment_p = float(values[-1])
+        else:
+            augment_p = 0.0
+    else:
+        augment_p = 0.0
+
+    return float(augment_p)
+
+#----------------------------------------------------------------------------
+
 @click.command()
 
 # Required.
@@ -149,6 +182,7 @@ def locate_latest_pkl(outdir: str):
 @click.option('--aug',          help='Augmentation mode',                                       type=click.Choice(['noaug', 'ada', 'fixed']), default='ada', show_default=True)
 @click.option('--resume',       help='Resume from given network pickle (PATH, URL or "latest")', metavar='[PATH|URL|"latest"]',  type=str)
 @click.option('--freezed',      help='Freeze first layers of D', metavar='INT',                 type=click.IntRange(min=0), default=0, show_default=True)
+@click.option('--initstrength', help='Override ADA strength at start',                          type=click.FloatRange(min=0))
 
 # Misc hyperparameters.
 @click.option('--p',            help='Probability for --aug=fixed', metavar='FLOAT',            type=click.FloatRange(min=0, max=1), default=0.2, show_default=True)
@@ -270,15 +304,28 @@ def main(**kwargs):
         if opts.aug == 'fixed':
             c.augment_p = opts.p
 
+    # Initial Augmentation Strength.
+    if opts.initstrength is not None:
+        assert isinstance(opts.initstrength, float)
+        c.augment_p = opts.initstrength
+
     # Resume.
     if opts.resume is not None:
         if opts.resume == "latest":
            c.resume_pkl, c.resume_kimg = locate_latest_pkl(opts.outdir)
         else:
            c.resume_pkl = opts.resume
-        c.ada_kimg = 100 # Make ADA react faster at the beginning.
-        c.ema_rampup = None # Disable EMA rampup.
-        c.loss_kwargs.blur_init_sigma = 0 # Disable blur rampup.
+           # Important : Don't wan't to ramp up the speed every time I resume a paused session
+               # Only do it when I resume from specific file (transfer learning)
+           c.ada_kimg = 100 # Make ADA react faster at the beginning.
+           c.ema_rampup = None # Disable EMA rampup.
+           c.loss_kwargs.blur_init_sigma = 0 # Disable blur rampup.
+        
+        # Overwrite augment_p only if the augmentation probability is not fixed by the user
+        if c.ada_target is not None and "augment_p" not in c:
+            c.augment_p = parse_augment_p_from_log(c.resume_pkl)
+            if c.augment_p > 0:
+                print(f'Resuming with augment_p = {c.augment_p}')
 
     # Performance-related toggles.
     if opts.fp32:

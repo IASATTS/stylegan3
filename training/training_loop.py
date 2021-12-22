@@ -156,12 +156,6 @@ def training_loop(
     if (resume_pkl is not None) and (rank == 0):
         print(f'Resuming from "{resume_pkl}"')
         
-        # Overwrite augment_p only if the augmentation probability is not fixed by the user
-        if ada_target is not None and augment_p == 0:
-            augment_p = parse_augment_p_from_log(resume_pkl)
-            if augment_p > 0:
-                print(f'Resuming with augment_p = {augment_p}')
-        
         with dnnlib.util.open_url(resume_pkl) as f:
             resume_data = legacy.load_network_pkl(f)
         for name, module in [('G', G), ('D', D), ('G_ema', G_ema)]:
@@ -258,7 +252,6 @@ def training_loop(
     if progress_fn is not None:
         progress_fn(0, total_kimg)
     while True:
-
         # Fetch training data.
         with torch.autograd.profiler.record_function('data_fetch'):
             phase_real_img, phase_real_c = next(training_set_iterator)
@@ -429,36 +422,3 @@ def training_loop(
     if rank == 0:
         print()
         print('Exiting...')
-
-#----------------------------------------------------------------------------
-
-def parse_augment_p_from_log(network_pickle_name):
-
-    if network_pickle_name is not None:
-        network_folder_name = os.path.dirname(network_pickle_name)
-        log_file_name = network_folder_name + "/log.txt"
-
-        try:
-            with open(log_file_name, "r") as f:
-                # Tokenize each line starting with the word 'tick'
-                lines = [
-                    l.strip().split() for l in f.readlines() if l.startswith("tick")
-                ]
-        except FileNotFoundError:
-            lines = []
-
-        # Extract the last token of each line for which the second to last token is 'augment'
-        values = [
-            tokens[-1]
-            for tokens in lines
-            if len(tokens) > 1 and tokens[-2] == "augment"
-        ]
-
-        if len(values)>0:
-            augment_p = float(values[-1])
-        else:
-            augment_p = 0.0
-    else:
-        augment_p = 0.0
-
-    return float(augment_p)
