@@ -22,6 +22,7 @@ from training import training_loop
 from metrics import metric_main
 from torch_utils import training_stats
 from torch_utils import custom_ops
+from os.path import exists
 
 #----------------------------------------------------------------------------
 
@@ -166,6 +167,28 @@ def parse_augment_p_from_log(network_pickle_name):
 
 #----------------------------------------------------------------------------
 
+# Read the latest snapshot augment value from latest_snapshot_augment.txt
+def parse_augment_p_from_file(network_pickle_name):
+    
+    network_folder_name = os.path.dirname(network_pickle_name)
+    snapshot_augment_file_name = network_folder_name + "/latest_snapshot_augment.txt"
+
+    if exists(snapshot_augment_file_name):
+        with open(snapshot_augment_file_name, "r") as f:
+            value = f.read()
+            
+            if len(value)>0:
+                augment_p = float(value)
+            else:
+                augment_p = float(0.0)
+    else:
+        print(f'ERROR : File "{snapshot_augment_file_name}" not found, fallback to reading last augment in log file.')
+        augment_p = parse_augment_p_from_log(network_pickle_name)
+
+    return augment_p
+
+#----------------------------------------------------------------------------
+
 @click.command()
 
 # Required.
@@ -201,6 +224,7 @@ def parse_augment_p_from_log(network_pickle_name):
 @click.option('--kimg',         help='Total training duration', metavar='KIMG',                 type=click.IntRange(min=1), default=25000, show_default=True)
 @click.option('--tick',         help='How often to print progress', metavar='KIMG',             type=click.IntRange(min=1), default=4, show_default=True)
 @click.option('--snap',         help='How often to save snapshots', metavar='TICKS',            type=click.IntRange(min=1), default=50, show_default=True)
+@click.option('--metrics-interval',         help='How often to calculate metrics (1 = every snapshot, 2 = every 2 snapshot, etc.)', metavar='TICKS', type=click.IntRange(min=1), default=1, show_default=True)
 @click.option('--seed',         help='Random seed', metavar='INT',                              type=click.IntRange(min=0), default=0, show_default=True)
 @click.option('--fp32',         help='Disable mixed-precision', metavar='BOOL',                 type=bool, default=False, show_default=True)
 @click.option('--nobench',      help='Disable cuDNN benchmarking', metavar='BOOL',              type=bool, default=False, show_default=True)
@@ -263,6 +287,7 @@ def main(**kwargs):
     c.total_kimg = opts.kimg
     c.kimg_per_tick = opts.tick
     c.image_snapshot_ticks = c.network_snapshot_ticks = opts.snap
+    c.metrics_interval = opts.metrics_interval
     c.random_seed = c.training_set_kwargs.random_seed = opts.seed
     c.data_loader_kwargs.num_workers = opts.workers
 
@@ -323,7 +348,7 @@ def main(**kwargs):
         
         # Overwrite augment_p only if the augmentation probability is not fixed by the user
         if c.ada_target is not None and "augment_p" not in c:
-            c.augment_p = parse_augment_p_from_log(c.resume_pkl)
+            c.augment_p = parse_augment_p_from_file(c.resume_pkl)
             if c.augment_p > 0:
                 print(f'Resuming with augment_p = {c.augment_p}')
 

@@ -22,6 +22,7 @@ from torch_utils import misc
 from torch_utils import training_stats
 from torch_utils.ops import conv2d_gradfix
 from torch_utils.ops import grid_sample_gradfix
+from datetime import datetime
 
 import legacy
 from metrics import metric_main
@@ -119,6 +120,7 @@ def training_loop(
     cudnn_benchmark         = True,     # Enable torch.backends.cudnn.benchmark?
     abort_fn                = None,     # Callback function for determining whether to abort training. Must return consistent results across ranks.
     progress_fn             = None,     # Callback function for updating training progress. Called for all ranks.
+    metrics_interval        = 1,        # How often to calculate metrics (1 = every snapshot, 2 = every 2 snapshot, etc.).
 ):
     # Initialize.
     start_time = time.time()
@@ -245,10 +247,13 @@ def training_loop(
         print()
     cur_nimg = resume_kimg * 1000
     cur_tick = 0
+    cur_snapshot_count = 0
+    
     tick_start_nimg = cur_nimg
     tick_start_time = time.time()
     maintenance_time = tick_start_time - start_time
     batch_idx = 0
+    
     if progress_fn is not None:
         progress_fn(0, total_kimg)
     while True:
@@ -335,6 +340,7 @@ def training_loop(
         fields += [f"reserved {training_stats.report0('Resources/peak_gpu_mem_reserved_gb', torch.cuda.max_memory_reserved(device) / 2**30):<6.2f}"]
         torch.cuda.reset_peak_memory_stats()
         fields += [f"augment {training_stats.report0('Progress/augment', float(augment_pipe.p.cpu()) if augment_pipe is not None else 0):.3f}"]
+        fields += [f"date {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"]
         training_stats.report0('Timing/total_hours', (tick_end_time - start_time) / (60 * 60))
         training_stats.report0('Timing/total_days', (tick_end_time - start_time) / (24 * 60 * 60))
         if rank == 0:
@@ -351,7 +357,7 @@ def training_loop(
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
             images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)]).numpy()
             save_image_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
-
+            
         # Save network snapshot.
         snapshot_pkl = None
         snapshot_data = None
@@ -370,9 +376,20 @@ def training_loop(
             if rank == 0:
                 with open(snapshot_pkl, 'wb') as f:
                     pickle.dump(snapshot_data, f)
+              
+            print(f'Created snapshot: {snapshot_pkl}')
+              
+            # Update the latest_snapshot_augment file
+            path = os.path.join(run_dir, 'latest_snapshot_augment.txt')
+            f = open(path, "w")
+            f.write(str(float(augment_pipe.p.cpu())))
+            f.close()
+            
+            # Increase the snapshot count
+            cur_snapshot_count = cur_snapshot_count + 1
 
-        # Evaluate metrics.
-        if (snapshot_data is not None) and (len(metrics) > 0):
+        # Evaluate metrics (calculate it only every #metrics_interval# interval, always starting on the first snapshot)
+        if (snapshot_data is not None) and (len(metrics) > 0) and ((cur_snapshot_count - 1) % metrics_interval == 0):
             if rank == 0:
                 print('Evaluating metrics...')
             for metric in metrics:

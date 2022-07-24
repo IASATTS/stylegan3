@@ -81,6 +81,8 @@ class GlfwWindow: # pylint: disable=too-many-public-methods
 
     @property
     def monitor_width(self):
+        #print(glfw.__dir__())
+        #x,y,z = glfw.get_version()
         _, _, width, _height = glfw.get_monitor_workarea(glfw.get_primary_monitor())
         return width
 
