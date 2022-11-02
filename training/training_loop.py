@@ -380,10 +380,11 @@ def training_loop(
             print(f'Created snapshot: {snapshot_pkl}')
               
             # Update the latest_snapshot_augment file
-            path = os.path.join(run_dir, 'latest_snapshot_augment.txt')
-            f = open(path, "w")
-            f.write(str(float(augment_pipe.p.cpu())))
-            f.close()
+            if (augment_pipe is not None):
+                path = os.path.join(run_dir, 'latest_snapshot_augment.txt')
+                f = open(path, "w")
+                f.write(str(float(augment_pipe.p.cpu())))
+                f.close()
             
             # Increase the snapshot count
             cur_snapshot_count = cur_snapshot_count + 1

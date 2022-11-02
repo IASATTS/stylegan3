@@ -322,7 +322,9 @@ def main(**kwargs):
             c.loss_kwargs.blur_fade_kimg = c.batch_size * 200 / 32 # Fade out the blur during the first N kimg.
 
     # Augmentation.
-    if opts.aug != 'noaug':
+    if opts.aug == 'noaug':
+        c.ada_target = None
+    else:
         c.augment_kwargs = dnnlib.EasyDict(class_name='training.augment.AugmentPipe', xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1)
         if opts.aug == 'ada':
             c.ada_target = opts.target
@@ -345,6 +347,8 @@ def main(**kwargs):
            c.ada_kimg = 100 # Make ADA react faster at the beginning.
            c.ema_rampup = None # Disable EMA rampup.
            c.loss_kwargs.blur_init_sigma = 0 # Disable blur rampup.
+        
+        test = c.ada_target
         
         # Overwrite augment_p only if the augmentation probability is not fixed by the user
         if c.ada_target is not None and "augment_p" not in c:
